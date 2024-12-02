@@ -148,7 +148,7 @@ async function checkAndSendEmail() {
 }
 
 // Cron job para enviar correos cada minuto
-cron.schedule('*/1 * * * *', checkAndSendEmail);
+cron.schedule('*/5 * * * * *', checkAndSendEmail);
 logger.info('Cron job para envío de correos iniciado. Ejecutándose cada minuto...');
 
 // Función para rellenar la tabla 'emails' periódicamente
@@ -171,5 +171,5 @@ async function fillTable() {
 }
 
 // Cron job para rellenar la tabla cada 10 minutos
-cron.schedule('*/10 * * * *', fillTable);
+cron.schedule('*/5 * * * *', fillTable);
 logger.info('Cron job para rellenar la tabla iniciado. Ejecutándose cada 10 minutos...');

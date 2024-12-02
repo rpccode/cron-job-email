@@ -31,45 +31,26 @@ const transporter = nodemailer.createTransport({
   port: process.env.MAIL_PORT || 1025,
   secure: false, // Mailhog no utiliza TLS/SSL
   logger: true,
-  debug: true,
+  debug: true
 });
 
 // Función para reconectar a la base de datos con reintentos
 async function connectWithRetry() {
-  const maxRetries = 5;
-  const delay = 5000; // 5 segundos
-  let attempt = 0;
-
-  while (attempt < maxRetries) {
+  let retries = 5;
+  while (retries) {
     try {
       await client.connect();
       logger.info('Conexión a PostgreSQL exitosa');
       return;
     } catch (err) {
-      const remainingRetries = maxRetries - (attempt + 1);
-      logger.error(
-        `Error al conectar a PostgreSQL. Reintentando en ${delay / 1000} segundos... (${remainingRetries} intentos restantes)`,
-        err
-      );
-
-      attempt++;
-      if (remainingRetries === 0) {
+      retries--;
+      logger.error(`Error al conectar a PostgreSQL, reintentando (${retries} intentos restantes)...`);
+      if (retries === 0) {
         logger.error('No se pudo conectar a PostgreSQL después de varios intentos');
         process.exit(1);
       }
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await new Promise((res) => setTimeout(res, 5000));
     }
-  }
-}
-
-
-// Función para verificar la conexión a PostgreSQL
-async function ensureConnection() {
-  try {
-    await client.query('SELECT 1');
-  } catch (err) {
-    logger.error('Conexión perdida con PostgreSQL, reconectando...');
-    await connectWithRetry();
   }
 }
 
@@ -117,45 +98,55 @@ async function sendMailWithRetry(mailOptions) {
 // Función principal para consultar la base de datos y enviar correos
 async function checkAndSendEmail() {
   try {
-    await ensureConnection();
+    // Verificar conexión
+    if (client._connected === false) {
+      await connectWithRetry();
+    }
+
+    // Verificar si la tabla existe y crearla si no es así
     await createTableIfNotExists();
 
-    // Consultar la base de datos
-    const res = await client.query('SELECT * FROM emails WHERE sent = false LIMIT 10;');
-    const emailsToSend = res.rows;
+    // Ejecutar consulta
+    const res = await client.query("SELECT * FROM emails WHERE sent = false LIMIT 1;");
 
-    if (emailsToSend.length > 0) {
-      logger.info(`Se encontraron ${emailsToSend.length} correos para enviar.`);
-      const mailPromises = emailsToSend.map(async (email) => {
-        const mailOptions = {
-          from: 'noreply@example.com',
-          to: email.recipient,
-          subject: `Datos disponibles en la base de datos: ${email.subject}`,
-          text: `Se han encontrado datos en la base de datos que cumplen con la condición. Datos: ${email.message}`,
-        };
+    // Si hay resultados, enviar un correo
+    if (res.rows.length > 0) {
+      logger.info('Datos encontrados, enviando correo...');
+      const email = res.rows[0];
 
-        await sendMailWithRetry(mailOptions);
-        await client.query('UPDATE emails SET sent = true WHERE id = $1', [email.id]);
-      });
+      const mailOptions = {
+        from: 'noreply@example.com',
+        to: email.recipient,
+        subject: `Datos disponibles en la base de datos: ${email.subject}`,
+        text: `Se han encontrado datos en la base de datos que cumplen con la condición. datos: ${email.message}`,
+      };
 
-      await Promise.all(mailPromises);
+      await client.query('UPDATE emails SET sent = true WHERE id = $1', [email.id]);
+      await sendMailWithRetry(mailOptions);
     } else {
-      logger.info('No se encontraron correos pendientes de envío.');
+      logger.info('No se encontraron datos disponibles');
     }
   } catch (err) {
     logger.error('Error al consultar o enviar el correo:', err);
   }
 }
 
-// Cron job para enviar correos cada minuto
-cron.schedule('*/5 * * * * *', checkAndSendEmail);
-logger.info('Cron job para envío de correos iniciado. Ejecutándose cada minuto...');
 
-// Función para rellenar la tabla 'emails' periódicamente
+
+// Programar el cron job para ejecutarse cada 5 segundos
+cron.schedule('*/5 * * * * *', checkAndSendEmail);
+
+logger.info('Cron job iniciado. Consultando la base de datos cada 5 segundos...');
+
+// Función para rellenar la tabla 'emails' cada 5 minutos
 async function fillTable() {
   try {
-    await ensureConnection();
+    // Verificar conexión
+    if (client._connected === false) {
+      await connectWithRetry();
+    }
 
+    // Insertar datos en la tabla
     const insertQuery = `
       INSERT INTO emails (recipient, subject, message) 
       VALUES 
@@ -164,12 +155,13 @@ async function fillTable() {
       ('test3@example.com', 'Prueba 3', 'Este es un mensaje de prueba 3');
     `;
     await client.query(insertQuery);
-    logger.info('Datos insertados en la tabla "emails".');
+    logger.info('Datos insertados en la tabla "emails"');
   } catch (err) {
     logger.error('Error al rellenar la tabla "emails":', err);
   }
 }
 
-// Cron job para rellenar la tabla cada 10 minutos
-cron.schedule('*/5 * * * *', fillTable);
-logger.info('Cron job para rellenar la tabla iniciado. Ejecutándose cada 10 minutos...');
+// Programar un cron job para rellenar la tabla cada 5 minutos
+cron.schedule('*/10 * * * * *', fillTable);
+
+logger.info('Cron job para rellenar la tabla iniciado. Ejecutándose cada 10 segundos...');

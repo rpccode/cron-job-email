@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  mailhog:
+    image: mailhog/mailhog
+    container_name: mailhog
+    ports:
+      - "8025:8025" # Interfaz web
+      - "1025:1025" # SMTP
+    networks:
+      - mynetwork
+
+  node-app:
+    build:
+      context: .
+    container_name: cron-job-email
+    depends_on:
+      - mailhog
+      - postgres-db
+    environment:
+      PG_HOST: postgres-db
+      PG_USER: postgres
+      PG_PASSWORD: 0923
+      PG_DATABASE: cronjob
+      MAIL_HOST: mailhog
+      MAIL_PORT: 1025
+      MAIL_USER: ''
+      MAIL_PASS: ''
+    networks:
+      - mynetwork
+
+  postgres-db:
+    image: postgres:latest
+    restart: always
+    container_name: postgres-db
+    environment:
+      DATABASE_HOST: 127.0.0.1
+      POSTGRES_PASSWORD: 0923
+      POSTGRES_USER: postgres
+      POSTGRES_DB: cronjob
+    ports:
+      - "5433:5432"
+    networks:
+      - mynetwork
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # pgadmin:
+  #   image: dpage/pgadmin4
+  #   container_name: pgadmin
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@example.com # Cambia este correo
+  #     PGADMIN_DEFAULT_PASSWORD: admin123       # Cambia esta contraseña
+  #   ports:
+  #     - "5050:80" # Acceso a la interfaz web de pgAdmin
+  #   depends_on:
+  #     - postgres-db
+  #   networks:
+  #     - mynetwork
+
+networks:
+  mynetwork:
+    driver: bridge
+
+volumes:
+  postgres_data:
